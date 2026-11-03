@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Simulering av nivåregulering: LT 1, LIC 1, LY 1, P 1 og LZ 2 overfyllingsvern.">
+<meta name="theme-color" content="#e4e6e3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1d1c" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Nivåregulering">
+<title>Nivåregulering Tank 1</title>
+<link rel="stylesheet" href="fonts.css">
+<style>html,body{margin:0}</style>
+<style>
+/* Layout: HMI i ISA-101-stil – grå, rolig flate; farge brukes bare for prosessverdier og avvik. P&ID til venstre, faceplate til høyre, trend under. */
+:root{
+  --bg:#e4e6e3; --panel:#f1f2f0; --line:#b9bdb7; --ink:#1f2421; --muted:#5d645f;
+  --pipe:#2b302d; --sig:#6b726d; --water:#6f9fc7; --water-2:#a9c6de;
+  --sp:#2f6db0; --out:#8a5a1c; --pv:#1f2421;
+  --alarm:#c4261d; --alarm-bg:#fbe3e0; --warn:#b97a00; --ok:#2e7d4f;
+  --accent:#2f6db0;
+  --f-ui:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-num:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#1a1d1c; --panel:#232726; --line:#3a403d; --ink:#e3e6e3; --muted:#9aa29d;
+  --pipe:#c9cec9; --sig:#8c948f; --water:#3f78a8; --water-2:#2a4d6b;
+  --sp:#6ea8e6; --out:#d9a35a; --pv:#e3e6e3;
+  --alarm:#ff6b5e; --alarm-bg:#3d1c19; --warn:#e3b04b; --ok:#5cc28a; --accent:#6ea8e6; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#1a1d1c; --panel:#232726; --line:#3a403d; --ink:#e3e6e3; --muted:#9aa29d;
+  --pipe:#c9cec9; --sig:#8c948f; --water:#3f78a8; --water-2:#2a4d6b;
+  --sp:#6ea8e6; --out:#d9a35a; --pv:#e3e6e3;
+  --alarm:#ff6b5e; --alarm-bg:#3d1c19; --warn:#e3b04b; --ok:#5cc28a; --accent:#6ea8e6; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-ui);font-size:15px;line-height:1.45;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 20px}
+h1{font-size:1.6rem;font-weight:700;margin:0;letter-spacing:.01em;text-wrap:balance}
+.sub{color:var(--muted);margin:2px 0 0}
+.simctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  padding:6px 12px;border-radius:4px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+button:disabled{opacity:.45;cursor:not-allowed}
+select{font:inherit;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:5px 6px}
+.alarms{display:flex;flex-wrap:wrap;gap:8px;min-height:34px}
+.alm{font-weight:700;font-size:.85rem;letter-spacing:.06em;text-transform:uppercase;padding:6px 10px;border-radius:3px;
+  border:1px solid var(--alarm);color:var(--alarm);background:var(--alarm-bg);animation:blink 1s steps(2) infinite}
+.alm.ack{animation:none}
+.alm.warn{border-color:var(--warn);color:var(--warn);background:transparent}
+.calm{color:var(--muted);font-size:.85rem;padding:7px 0;letter-spacing:.04em;text-transform:uppercase}
+@keyframes blink{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.alm{animation:none}}
+.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:16px}
+@media (max-width:860px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;min-width:0}
+.ptitle{font-size:.75rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 10px;
+  display:flex;justify-content:space-between;gap:8px}
+svg{display:block;width:100%;height:auto}
+svg text{font-family:var(--f-ui);fill:var(--ink)}
+svg .num{font-family:var(--f-num);font-size:12px}
+.face{display:flex;flex-direction:column;gap:14px}
+.tagrow{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.tag{font-size:1.25rem;font-weight:700}
+.tag small{font-weight:400;color:var(--muted);font-size:.85rem;margin-left:6px}
+.mode{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.mode button{border:0;border-radius:0}
+.big{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.big div{border-top:3px solid var(--line);padding-top:6px}
+.big .l{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.big .v{font-family:var(--f-num);font-size:1.6rem;font-weight:600;font-variant-numeric:tabular-nums}
+.big .u{font-size:.8rem;color:var(--muted)}
+.big .pv{border-color:var(--pv)} .big .sp{border-color:var(--sp)} .big .op{border-color:var(--out)}
+.big .sp .v{color:var(--sp)} .big .op .v{color:var(--out)}
+.ctl{display:grid;grid-template-columns:7.5em minmax(0,1fr) 4.2em;align-items:center;gap:6px 10px}
+.ctl label{font-weight:500}
+.ctl output{font-family:var(--f-num);font-variant-numeric:tabular-nums;text-align:right;font-size:.9rem}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.sep{border:0;border-top:1px solid var(--line);margin:2px 0}
+.chain{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-size:.8rem}
+.chain div{background:var(--bg);border-radius:4px;padding:6px 8px}
+.chain b{display:block;font-size:.72rem;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.chain span{font-family:var(--f-num);font-variant-numeric:tabular-nums;font-size:.95rem}
+@media (max-width:480px){.chain{grid-template-columns:repeat(2,1fr)}.big .v{font-size:1.3rem}}
+.check{display:flex;gap:8px;align-items:center}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:.8rem;color:var(--muted)}
+.legend i{display:inline-block;width:18px;height:3px;vertical-align:middle;margin-right:5px}
+canvas{width:100%;height:260px;display:block}
+.tasks{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:0;padding:0;list-style:none}
+.tasks li{background:var(--bg);border-radius:4px;padding:10px 12px}
+.tasks b{display:block;margin-bottom:2px}
+.tasks p{margin:0;color:var(--muted);font-size:.9rem}
+.note{font-size:.82rem;color:var(--muted);margin:0}
+/* Kontrollskap: speiler det fysiske skapet på riggen */
+:root{--cab:#dcdfdb;--bezel:#9aa09b;--btn-g:#2fa257;--btn-g-off:#1f5a34;--btn-r:#cf3a2f;--sw-y:#efc12e;--sw-r:#c8312a;--sw-h:#8e1f1a;--scr-bg:#18231c;--scr-fg:#86e9a0}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--cab:#2b2f2d;--bezel:#5b625d}}
+:root[data-theme="dark"]{--cab:#2b2f2d;--bezel:#5b625d}
+.cab{background:var(--cab);border:1px solid var(--line);border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:12px}
+.cabrow{display:flex;flex-wrap:wrap;gap:14px 18px;align-items:flex-end}
+.pbw{display:flex;flex-direction:column;align-items:center;gap:5px;font-size:.68rem;letter-spacing:.08em;font-weight:600;color:var(--muted);text-transform:uppercase}
+.pb{width:48px;height:48px;border-radius:50%;padding:0;border:5px solid var(--bezel);cursor:pointer}
+.pb.g{background:var(--btn-g-off)}
+.pb.g.lit{background:var(--btn-g);box-shadow:0 0 14px var(--btn-g)}
+.pb.r{background:var(--btn-r)}
+.pb:active{transform:scale(.94)}
+.pb:disabled{opacity:.5}
+.sw{padding:0;border:0;background:none;width:66px;height:66px;cursor:pointer}
+.sw:disabled{cursor:not-allowed;opacity:1}
+.sw svg text{fill:#1f2421;font-family:var(--f-ui);font-weight:700}
+.lic{background:var(--scr-bg);color:var(--scr-fg);font-family:var(--f-num);border:5px solid var(--bezel);border-radius:4px;padding:6px 10px;display:flex;flex-direction:column;font-size:.8rem;min-width:8em;font-variant-numeric:tabular-nums}
+.lic .lictag{font-size:.68rem;letter-spacing:.1em;opacity:.75}
+.lic b{font-weight:600}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>Nivåregulering Tank 1</h1>
+    <p class="sub">LT 1 → LIC 1 → LY 1 (I/f) → pumpe P 1, med LZ 2 som uavhengig overfyllingsvern</p>
+  </div>
+  <div class="simctl">
+    <button id="run" class="on" type="button">Pause</button>
+    <button id="reset" type="button">Start på nytt</button>
+    <label for="speed" style="color:var(--muted)">Tid</label>
+    <select id="speed"><option value="1">1×</option><option value="2">2×</option><option value="5" selected>5×</option><option value="10">10×</option></select>
+  </div>
+</header>
+
+<div class="alarms" id="alarms" aria-live="polite"></div>
+
+<div class="grid">
+  <section class="panel">
+    <p class="ptitle"><span>Prosessbilde</span><span id="clock" class="num">t = 0 s</span></p>
+    <svg viewBox="0 0 620 540" role="img" aria-label="Levende flytskjema av tank 1, tank 2, ventil V 1, pumpe P 1 og instrumentering">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="var(--sig)"/></marker>
+        <marker id="arp" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="var(--pipe)"/></marker>
+        <clipPath id="c1"><rect x="62" y="72" width="96" height="236" rx="6"/></clipPath>
+        <clipPath id="c2"><rect x="52" y="382" width="116" height="106" rx="6"/></clipPath>
+      </defs>
+      <!-- prosessrør -->
+      <g fill="none" stroke="var(--pipe)" stroke-width="4">
+        <path d="M110 490 V512 H372"/>
+        <path d="M428 512 H588 V30 H110 V70" marker-end="url(#arp)"/>
+        <path d="M110 310 V338"/><path d="M110 372 V380" marker-end="url(#arp)"/>
+      </g>
+      <!-- strømningsanimasjon -->
+      <g fill="none" stroke="var(--water)" stroke-width="2.5" stroke-dasharray="6 10">
+        <path id="flowP" d="M110 490 V512 H372 M428 512 H588 V30 H110 V66"/>
+        <path id="flowV" d="M110 310 V378"/>
+      </g>
+      <!-- Tank 1 -->
+      <rect x="60" y="70" width="100" height="240" rx="7" fill="var(--panel)" stroke="var(--pipe)" stroke-width="3"/>
+      <rect id="w1" clip-path="url(#c1)" x="62" y="190" width="96" height="120" fill="var(--water)"/>
+      <line x1="56" x2="164" y1="102.8" y2="102.8" stroke="var(--muted)" stroke-width="1"/>
+      <text x="53" y="106" text-anchor="end" font-size="10" style="fill:var(--muted)">100 %</text>
+      <text x="53" y="80" text-anchor="end" font-size="10" style="fill:var(--muted)">Overløp</text>
+      <text x="53" y="91" text-anchor="end" font-size="10" style="fill:var(--muted)">115 %</text>
+      <line id="spLine" x1="56" x2="164" y1="190" y2="190" stroke="var(--sp)" stroke-width="2" stroke-dasharray="5 3"/>
+      <line id="lzLine" x1="56" x2="164" y1="94" y2="94" stroke="var(--alarm)" stroke-width="1.5" stroke-dasharray="2 3"/>
+      <text id="lzTxt" x="168" y="98" font-size="10" fill="var(--alarm)" style="fill:var(--alarm)">LZ 90 %</text>
+      <text x="110" y="62" text-anchor="middle" font-weight="700" font-size="15">Tank 1</text>
+      <text id="t1v" x="110" y="296" text-anchor="middle" class="num" font-weight="600">50,0 %</text>
+      <!-- Tank 2 -->
+      <rect x="50" y="380" width="120" height="110" rx="7" fill="var(--panel)" stroke="var(--pipe)" stroke-width="3"/>
+      <rect id="w2" clip-path="url(#c2)" x="52" y="435" width="116" height="55" fill="var(--water-2)"/>
+      <text x="110" y="402" text-anchor="middle" font-weight="700" font-size="15">Tank 2</text>
+      <text id="t2v" x="110" y="476" text-anchor="middle" class="num" font-weight="600">50,0 %</text>
+      <!-- HV 1 -->
+      <g id="hv" transform="translate(110 355)">
+        <path d="M-12 -16 L12 -16 L-12 16 L12 16 Z" fill="var(--panel)" stroke="var(--pipe)" stroke-width="2.5" stroke-linejoin="round"/>
+        <line x1="0" y1="0" x2="30" y2="0" stroke="var(--pipe)" stroke-width="2.5"/><line x1="30" y1="-10" x2="30" y2="10" stroke="var(--pipe)" stroke-width="2.5"/>
+      </g>
+      <text x="148" y="352" font-weight="700" font-size="14">V 1</text>
+      <text id="hvv" x="148" y="368" class="num">50 % åpen</text>
+      <!-- signal LT1 -->
+      <path d="M140 310 V326 H272" fill="none" stroke="var(--sig)" stroke-width="1.5"/>
+      <path d="M300 326 H372" fill="none" stroke="var(--sig)" stroke-width="1.5" stroke-dasharray="7 3 1 3" marker-end="url(#ar)"/>
+      <!-- LIC -> LY -->
+      <path d="M400 354 V428" fill="none" stroke="var(--sig)" stroke-width="1.5" stroke-dasharray="7 3 1 3" marker-end="url(#ar)"/>
+      <!-- LY -> pumpe -->
+      <path d="M400 484 V482 M400 484 V486" stroke="none"/>
+      <path d="M400 484 V488" fill="none" stroke="var(--sig)" stroke-width="1.5" marker-end="url(#ar)"/>
+      <!-- LZ2 -->
+      <path d="M140 70 V52 H212" fill="none" stroke="var(--sig)" stroke-width="1.5"/>
+      <path d="M240 52 H520 V456 H430" fill="none" stroke="var(--sig)" stroke-width="1.5" stroke-dasharray="7 3 1 3" marker-end="url(#ar)"/>
+      <text x="380" y="46" text-anchor="middle" font-size="11" fill="var(--muted)" style="fill:var(--muted)">Stopper pumpa ved høyt nivå</text>
+      <!-- bobler -->
+      <g font-weight="700" text-anchor="middle">
+        <circle id="lzC" cx="226" cy="52" r="24" fill="var(--panel)" stroke="var(--pipe)" stroke-width="2"/>
+        <text x="226" y="49" font-size="13">LZ</text><text x="226" y="64" font-size="13">2</text>
+        <circle cx="286" cy="326" r="24" fill="var(--panel)" stroke="var(--pipe)" stroke-width="2"/>
+        <text x="286" y="323" font-size="13">LT</text><text x="286" y="338" font-size="13">1</text>
+        <circle cx="400" cy="326" r="28" fill="var(--panel)" stroke="var(--pipe)" stroke-width="2"/>
+        <line x1="372" x2="428" y1="326" y2="326" stroke="var(--pipe)" stroke-width="2"/>
+        <text x="400" y="320" font-size="13">LIC</text><text x="400" y="344" font-size="13">1</text>
+        <circle cx="400" cy="456" r="26" fill="var(--panel)" stroke="var(--pipe)" stroke-width="2"/>
+        <text x="400" y="453" font-size="13">LY</text><text x="400" y="468" font-size="13">1</text>
+      </g>
+      <!-- pumpe -->
+      <text x="366" y="500" text-anchor="end" font-weight="700" font-size="14">P 1</text>
+      <circle id="pumpC" cx="400" cy="512" r="26" fill="var(--panel)" stroke="var(--pipe)" stroke-width="3"/>
+      <path id="pumpT" d="M390 498 L416 512 L390 526 Z" fill="none" stroke="var(--pipe)" stroke-width="2.5" stroke-linejoin="round"/>
+      <!-- live verdier -->
+      <g class="num">
+        <text id="ltv" x="286" y="370" text-anchor="middle">12,0 mA</text>
+        <text id="licv" x="436" y="392">12,0 mA</text>
+        <text id="lyv" x="436" y="494">25,0 Hz</text>
+        <text id="qv" x="436" y="535">0,00 L/s</text>
+        <text id="lzv" x="226" y="96" text-anchor="middle">OK</text>
+      </g>
+      <text x="340" y="456" text-anchor="end" font-size="11" fill="var(--muted)" style="fill:var(--muted)">I/f: 4–20 mA → 0–50 Hz</text>
+    </svg>
+  </section>
+
+  <section class="panel face" aria-label="Faceplate LIC 1">
+    <div class="tagrow">
+      <span class="tag">LIC 1<small>Nivåregulator</small></span>
+      <div class="mode" role="group" aria-label="Driftsmodus">
+        <button id="mAuto" class="on" type="button">AUTO</button>
+        <button id="mMan" type="button">MAN</button>
+      </div>
+    </div>
+    <div class="big">
+      <div class="pv"><span class="l">PV nivå</span><br><span class="v" id="bPV">50,0</span> <span class="u">%</span></div>
+      <div class="sp"><span class="l">SP</span><br><span class="v" id="bSP">50,0</span> <span class="u">%</span></div>
+      <div class="op"><span class="l">Utgang</span><br><span class="v" id="bOP">0,0</span> <span class="u">%</span></div>
+    </div>
+    <div class="ctl">
+      <label for="sp">Settpunkt</label><input id="sp" type="range" min="0" max="100" step="1" value="50"><output id="spO">50 %</output>
+      <label for="man">Manuell ut</label><input id="man" type="range" min="0" max="100" step="1" value="35" disabled><output id="manO">35 %</output>
+    </div>
+    <hr class="sep">
+    <div class="ctl">
+      <label for="kp">Kp</label><input id="kp" type="range" min="0.1" max="10" step="0.1" value="2"><output id="kpO">2,0</output>
+      <label for="ti">Ti (s)</label><input id="ti" type="range" min="0" max="120" step="1" value="20"><output id="tiO">20</output>
+      <label for="td">Td (s)</label><input id="td" type="range" min="0" max="20" step="0.5" value="0"><output id="tdO">0,0</output>
+    </div>
+    <p class="note">Ti = 0 slår av I-leddet (ren P-regulator). Utgangen er begrenset til 0–100 % med anti-windup.</p>
+    <hr class="sep">
+    <div class="ctl">
+      <label for="hvs">V 1 forbruk</label><input id="hvs" type="range" min="0" max="100" step="1" value="0"><output id="hvO">0 %</output>
+    </div>
+    <div class="cab" aria-label="Kontrollskap for P 1">
+      <span class="tag" style="font-size:1.05rem">Kontrollskap P 1<small id="pumpState">Stoppet</small></span>
+      <div class="cabrow">
+        <div class="lic" aria-label="Regulatordisplay LIC 1"><span class="lictag">LIC 1</span><span>PV <b id="dPV">50,0</b> %</span><span>SP <b id="dSP">50,0</b> %</span></div>
+        <div class="pbw"><button id="pStart" class="pb g" type="button" aria-label="Drift"></button><span>Drift</span></div>
+        <div class="pbw"><button id="pStop" class="pb r" type="button" aria-label="Stopp"></button><span>Stopp</span></div>
+        <div class="pbw">
+          <button id="sw" class="sw" type="button" aria-label="Sikkerhetsbryter, vri mellom 0 og I">
+            <svg viewBox="0 0 70 70" aria-hidden="true">
+              <rect x="3" y="3" width="64" height="64" rx="5" fill="var(--sw-y)" stroke="var(--bezel)" stroke-width="2"/>
+              <text x="9" y="42" font-size="11">0</text><text x="32" y="14" font-size="11">I</text>
+              <circle cx="37" cy="39" r="19" fill="var(--sw-r)"/>
+              <rect id="swH" x="16" y="34" width="42" height="10" rx="4" fill="var(--sw-h)"/>
+              <g id="pad" visibility="hidden"><path d="M51 50 v-5 a5 5 0 0 1 10 0 v5" fill="none" stroke="#3a3f3c" stroke-width="2.5"/><rect x="48" y="50" width="16" height="13" rx="2" fill="#3a3f3c"/></g>
+            </svg>
+          </button>
+          <span>Sikkerhetsbryter</span>
+        </div>
+      </div>
+      <button id="lock" type="button" disabled>Lås i 0 med hengelås</button>
+      <p class="note">Sikkerhetsbryteren bryter spenningen til P 1. Etter at den er slått på igjen, må pumpa startes med Drift. Drift og Stopp virker både i AUTO og MAN.</p>
+    </div>
+    <div class="chain" aria-label="Signalkjede">
+      <div><b>LT 1</b><span id="cLT">12,00 mA</span></div>
+      <div><b>LIC 1 ut</b><span id="cLIC">4,00 mA</span></div>
+      <div><b>LY 1</b><span id="cLY">0,0 Hz</span></div>
+      <div><b>P 1</b><span id="cQ">0,00 L/s</span></div>
+    </div>
+    <hr class="sep">
+    <div class="tagrow">
+      <span class="tag" style="font-size:1.05rem">LZ 2<small id="lzSmall">Overfyllingsvern, trip ved 100 %</small></span>
+      <button id="lzReset" type="button" disabled>Tilbakestill LZ 2</button>
+    </div>
+    <div class="ctl">
+      <label for="lzs">LZ 2 trippunkt</label><input id="lzs" type="range" min="50" max="100" step="1" value="100"><output id="lzO">100 %</output>
+    </div>
+    <p class="note">Settes trippunktet til 100 %, stopper LZ 2 pumpa først når tanken er helt full.</p>
+    <label class="check"><input type="checkbox" id="ltFault"> Feil på LT 1 (målingen fryser)</label>
+    <label class="check"><input type="checkbox" id="lzBypass"> Forbikoble LZ 2 (kun for demonstrasjon)</label>
+  </section>
+</div>
+
+<section class="panel">
+  <p class="ptitle"><span>Trend, siste 3 minutter</span></p>
+  <div class="legend">
+    <span><i style="background:var(--pv)"></i>Nivå tank 1 (faktisk)</span>
+    <span><i style="background:var(--sp)"></i>Settpunkt</span>
+    <span><i style="background:var(--out)"></i>LIC 1 utgang</span>
+    <span><i style="background:var(--alarm)"></i>LZ 2 grense</span>
+  </div>
+  <canvas id="trend" aria-label="Trendkurve for nivå, settpunkt og regulatorutgang"></canvas>
+</section>
+
+<section class="panel">
+  <p class="ptitle"><span>Prøv dette</span></p>
+  <ul class="tasks">
+    <li><b>Sprangrespons</b><p>Flytt settpunktet fra 50 til 70 %. Hvor lang tid tar det før nivået er stabilt? Blir det oversving?</p></li>
+    <li><b>Forstyrrelse</b><p>Åpne V 1 fra 50 til 90 %. Hva gjør regulatoren med pumpefrekvensen, og hvorfor?</p></li>
+    <li><b>Ren P-regulator</b><p>Sett Ti til 0 og endre forbruket. Nivået får et varig avvik fra settpunktet. Hvor stort er det med Kp = 1 og Kp = 5?</p></li>
+    <li><b>Ustabil sløyfe</b><p>Sett Kp til 10 og Ti til 3 s. Hva skjer med nivået og pumpa?</p></li>
+    <li><b>Uten marginer</b><p>Sett LZ 2 til 100 % og settpunktet til 95 %. Hvor nær overløp kommer nivået ved et oversving? Hvorfor velger man en margin i praksis?</p></li>
+    <li><b>Feil på LT 1</b><p>Kryss av for feil på LT 1, og senk forbruket. Hvem stopper pumpa, og hvorfor må vernet ha egen giver?</p></li>
+    <li><b>Manuell drift</b><p>Sett LIC 1 i MAN og finn pumpeutgangen som holder nivået stabilt. Bytt tilbake til AUTO. Merker du rykk i utgangen?</p></li>
+  </ul>
+</section>
+</div>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const fmt=(v,d=1)=>v.toFixed(d).replace('.',',');
+// Prosessparametre
+const V1MAX=100;                 // måleområde LT 1: 0–100 L = 0–100 %
+const CAP1=115;                  // Tank 1 renner over ved 115 L (15 % margin over måleområdet)
+const V2MAX=150;                 // Tank 2 rommer 150 L
+const TY=v=>308-236*v/CAP1;      // nivå i % → y i tegningen av Tank 1
+const QMAX=2.0;                  // L/s ved 50 Hz
+const KV=2.0;                    // L/s ved 100 % åpen og full tank
+const RAMP=10;                   // Hz/s rampe i frekvensomformer
+let LZ_TRIP=100;
+let S;
+function init(){
+  S={power:true,locked:false,pumpRun:false,t:0,V1:50,V2:90,hz:0,I:35,pvPrev:50,dF:0,auto:true,man:35,u:35,trip:false,ack:false,frozen:null,hist:[],acc:0};
+}
+init();
+const P={sp:50,kp:2,ti:20,td:0,hv:0,fault:false,bypass:false};
+let running=true, speed=5;
+
+function step(dt){
+  const lvl=S.V1/V1MAX*100;
+  // LT 1
+  if(P.fault){ if(S.frozen===null) S.frozen=lvl; } else S.frozen=null;
+  const pv=Math.min(100,P.fault?S.frozen:lvl); // LT 1 går ikke over 20 mA
+  // LIC 1 – PID
+  const e=P.sp-pv;
+  const dPV=(pv-S.pvPrev)/dt; S.pvPrev=pv;
+  S.dF+= (dPV-S.dF)*Math.min(1,dt/1.0);
+  if(S.auto){
+    const D=-P.kp*P.td*S.dF;
+    let Inew=S.I;
+    if(P.ti>0) Inew+=P.kp*dt/P.ti*e; else Inew=0;
+    let u=P.kp*e+Inew+D;
+    if((u>100&&e>0)||(u<0&&e<0)){ u=Math.max(0,Math.min(100,P.kp*e+S.I+D)); } else S.I=Inew;
+    S.I=Math.max(-100,Math.min(200,S.I));
+    S.u=Math.max(0,Math.min(100,u));
+  } else {
+    S.u=S.man;
+    S.I=S.u-P.kp*e; // rykkfri overgang
+  }
+  // LZ 2 – uavhengig nivåbryter på faktisk nivå
+  if(!P.bypass && lvl>=LZ_TRIP-0.001 && !S.trip){S.trip=true;S.ack=false;}
+  // LY 1 – I/f, deretter frekvensomformer med rampe
+  const mA=4+16*S.u/100;
+  let hzTarget=(mA-4)/16*50;
+  if(S.trip && !P.bypass) hzTarget=0;
+  if(!S.pumpRun||!S.power) hzTarget=0;
+  const dh=hzTarget-S.hz; S.hz+=Math.sign(dh)*Math.min(Math.abs(dh),RAMP*dt);
+  // strømning
+  let qp=QMAX*S.hz/50; if(S.V2<=0.01) qp=0;
+  let qv=KV*(P.hv/100)*Math.sqrt(Math.max(0,S.V1)/V1MAX);
+  qp=Math.min(qp,S.V2/dt); qv=Math.min(qv,S.V1/dt);
+  S.V1+= (qp-qv)*dt; S.V2+=(qv-qp)*dt;
+  let over=0; if(S.V1>CAP1){over=S.V1-CAP1;S.V1=CAP1;S.V2+=over;} // overløp renner til tank 2
+  S.V2=Math.max(0,Math.min(V2MAX,S.V2)); S.V1=Math.max(0,S.V1);
+  S.qp=qp;S.qv=qv;S.pv=pv;S.mA=mA;S.ltmA=4+16*pv/100;S.overflow=S.V1>=CAP1-0.05;S.dry=S.V2<=0.5&&hzTarget>0;
+  S.t+=dt; S.acc+=dt;
+  if(S.acc>=0.5){S.acc=0;S.hist.push([S.t,lvl,P.sp,S.u]); while(S.hist.length&&S.hist[0][0]<S.t-180)S.hist.shift();}
+}
+
+// UI-binding
+function bind(id,key,out,dec,unit){
+  const el=$(id),o=$(out);
+  const f=()=>{P[key]=parseFloat(el.value);o.textContent=fmt(P[key],dec)+(unit||'');};
+  el.addEventListener('input',f);f();
+}
+bind('sp','sp','spO',0,' %');bind('kp','kp','kpO',1);bind('ti','ti','tiO',0);bind('td','td','tdO',1);bind('hvs','hv','hvO',0,' %');
+$('man').addEventListener('input',e=>{S.man=+e.target.value;$('manO').textContent=S.man+' %';});
+function setMode(a){S.auto=a;$('mAuto').classList.toggle('on',a);$('mMan').classList.toggle('on',!a);$('man').disabled=a;$('sp').disabled=!a;
+  if(!a){S.man=Math.round(S.u);$('man').value=S.man;$('manO').textContent=S.man+' %';}}
+$('mAuto').onclick=()=>setMode(true);$('mMan').onclick=()=>setMode(false);
+$('lzs').addEventListener('input',e=>{LZ_TRIP=+e.target.value;$('lzO').textContent=LZ_TRIP+' %';$('lzSmall').textContent='Overfyllingsvern, trip ved '+LZ_TRIP+' %';});
+function setPump(r){if(r&&!S.power)return;S.pumpRun=r;}
+$('sw').onclick=()=>{if(S.locked)return;S.power=!S.power;if(!S.power)S.pumpRun=false;};
+$('lock').onclick=()=>{if(S.power)return;S.locked=!S.locked;};
+$('pStart').onclick=()=>setPump(true);$('pStop').onclick=()=>setPump(false);
+$('ltFault').onchange=e=>P.fault=e.target.checked;
+$('lzBypass').onchange=e=>{P.bypass=e.target.checked;};
+$('lzReset').onclick=()=>{if(S.V1<LZ_TRIP){S.trip=false;}};
+$('run').onclick=()=>{running=!running;$('run').textContent=running?'Pause':'Fortsett';$('run').classList.toggle('on',running);};
+$('reset').onclick=()=>{init();setMode(true);setPump(false);$('hvs').value=0;P.hv=0;$('hvO').textContent='0 %';$('ltFault').checked=false;P.fault=false;};
+$('speed').onchange=e=>speed=+e.target.value;
+
+// tegning
+const cv=$('trend'),ctx=cv.getContext('2d');
+function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+function drawTrend(){
+  const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;
+  if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+  const L=38,R=10,T=10,B=24,pw=w-L-R,ph=h-T-B;
+  const t1=Math.max(S.t,180),t0=t1-180;
+  const X=t=>L+(t-t0)/180*pw,Y=v=>T+(1-v/CAP1)*ph;
+  ctx.font='11px "IBM Plex Mono", monospace';ctx.fillStyle=css('--muted');ctx.strokeStyle=css('--line');ctx.lineWidth=1;
+  ctx.textAlign='right';ctx.textBaseline='middle';
+  for(let v=0;v<=100;v+=25){ctx.beginPath();ctx.moveTo(L,Y(v));ctx.lineTo(L+pw,Y(v));ctx.stroke();ctx.fillText(v+' %',L-4,Y(v));}
+  ctx.textAlign='center';ctx.textBaseline='top';
+  for(let s=Math.ceil(t0/30)*30;s<=t1;s+=30){ctx.beginPath();ctx.moveTo(X(s),T);ctx.lineTo(X(s),T+ph);ctx.stroke();ctx.fillText(s+' s',X(s),T+ph+5);}
+  ctx.setLineDash([3,4]);ctx.strokeStyle=css('--alarm');ctx.beginPath();ctx.moveTo(L,Y(LZ_TRIP));ctx.lineTo(L+pw,Y(LZ_TRIP));ctx.stroke();ctx.setLineDash([]);
+  const H=S.hist; if(H.length<2)return;
+  const line=(i,col,wd,dash)=>{ctx.strokeStyle=col;ctx.lineWidth=wd;ctx.setLineDash(dash||[]);ctx.beginPath();
+    H.forEach((p,k)=>{const x=X(p[0]),y=Y(p[i]);k?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();ctx.setLineDash([]);};
+  line(3,css('--out'),1.5);line(2,css('--sp'),1.5,[6,4]);line(1,css('--pv'),2.2);
+  const last=H[H.length-1];ctx.fillStyle=css('--pv');ctx.beginPath();ctx.arc(X(last[0]),Y(last[1]),3.5,0,7);ctx.fill();
+}
+let dash=0;
+function render(){
+  const l1=S.V1, l2=S.V2;
+  const p2=l2/V2MAX*100;
+  $('w1').setAttribute('y',TY(l1));$('w1').setAttribute('height',236*l1/CAP1+4);
+  $('w2').setAttribute('y',382+106*(1-p2/100));$('w2').setAttribute('height',106*p2/100+4);
+  $('spLine').setAttribute('y1',TY(P.sp));$('spLine').setAttribute('y2',TY(P.sp));
+  const ly=TY(LZ_TRIP);$('lzLine').setAttribute('y1',ly);$('lzLine').setAttribute('y2',ly);$('lzTxt').setAttribute('y',Math.max(ly+4,80));$('lzTxt').textContent='LZ '+LZ_TRIP+' %';
+  $('t1v').textContent=fmt(l1)+' %';$('t2v').textContent=fmt(p2)+' %';
+  $('hvv').textContent=P.hv+' % åpen';
+  $('hv').querySelector('path').setAttribute('fill',P.hv>0?'var(--panel)':'var(--pipe)');
+  $('ltv').textContent=fmt(S.ltmA,1)+' mA';$('licv').textContent=fmt(S.mA,1)+' mA';
+  $('lyv').textContent=fmt(S.hz,1)+' Hz';$('qv').textContent=fmt(S.qp,2)+' L/s';
+  const tripped=S.trip&&!P.bypass;
+  $('lzv').textContent=P.bypass?'FORBIKOBLET':(tripped?'TRIP':'OK');
+  $('lzv').style.fill=tripped?'var(--alarm)':(P.bypass?'var(--warn)':'var(--ink)');
+  $('lzC').setAttribute('stroke',tripped?'var(--alarm)':'var(--pipe)');
+  $('pumpC').setAttribute('fill',S.hz>0.5?'var(--water-2)':'var(--panel)');
+  dash-= S.qp*3; $('flowP').style.strokeDashoffset=dash; $('flowP').style.opacity=S.qp>0.01?1:0;
+  $('flowV').style.strokeDashoffset=-(S.t*S.qv*20)%160; $('flowV').style.opacity=S.qv>0.01?1:0;
+  $('bPV').textContent=fmt(S.pv);$('bSP').textContent=fmt(P.sp);$('bOP').textContent=fmt(S.u);
+  $('cLT').textContent=fmt(S.ltmA,2)+' mA';$('cLIC').textContent=fmt(S.mA,2)+' mA';
+  $('cLY').textContent=fmt(S.hz,1)+' Hz';$('cQ').textContent=fmt(S.qp,2)+' L/s';
+  $('clock').textContent='t = '+Math.floor(S.t)+' s';
+  $('lzReset').disabled=!S.trip||S.V1>=LZ_TRIP;
+  // alarmer
+  const a=[];
+  if(tripped)a.push(['LZ 2 høyt nivå – P 1 stoppet','']);
+  if(S.overflow)a.push(['Overløp tank 1','']);
+  if(S.dry)a.push(['Tank 2 tom – P 1 går tørr','']);
+  if(P.fault)a.push(['LT 1 målefeil (frosset verdi)','warn']);
+  if(P.bypass)a.push(['LZ 2 forbikoblet','warn']);
+  if(!S.auto)a.push(['LIC 1 i manuell','warn']);
+  if(!S.pumpRun)a.push(['P 1 stoppet av operatør','warn']);
+  if(!S.power)a.push(['Sikkerhetsbryter i 0'+(S.locked?' (låst)':'')+' – P 1 uten spenning','warn']);
+  $('dPV').textContent=fmt(S.pv);$('dSP').textContent=fmt(P.sp);
+  $('swH').setAttribute('transform',S.power?'rotate(90 37 39)':'');
+  $('pad').setAttribute('visibility',S.locked?'visible':'hidden');
+  $('sw').disabled=S.locked;$('pStart').disabled=!S.power;
+  $('pStart').classList.toggle('lit',S.pumpRun&&S.power);
+  $('lock').disabled=S.power;$('lock').textContent=S.locked?'Fjern hengelås':'Lås i 0 med hengelås';
+  $('pumpState').textContent=!S.power?(S.locked?'Uten spenning, låst i 0':'Uten spenning'):!S.pumpRun?(S.hz>0.5?'Stopper …':'Stoppet'):(tripped?'Startsignal, men blokkert av LZ 2':(S.hz>0.5?'I drift':'Startsignal, 0 Hz'));
+  const html=a.length?a.map(x=>`<span class="alm ${x[1]}">${x[0]}</span>`).join(''):'<span class="calm">Ingen aktive alarmer</span>';
+  if($('alarms').dataset.h!==html){$('alarms').innerHTML=html;$('alarms').dataset.h=html;}
+  drawTrend();
+}
+// forhåndskjør litt slik at trenden har innhold
+for(let i=0;i<600;i++)step(0.05);
+let last=performance.now();
+function loop(now){
+  let dt=Math.min(0.1,(now-last)/1000);last=now;
+  if(running){let sim=dt*speed;while(sim>0){const h=Math.min(0.05,sim);step(h);sim-=h;}}
+  render();requestAnimationFrame(loop);
+}
+render();requestAnimationFrame(loop);
+})();
+</script>
+
+<script>
+if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
+</script>
+</body>
+</html>
