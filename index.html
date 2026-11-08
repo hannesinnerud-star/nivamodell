@@ -242,11 +242,25 @@ canvas{width:100%;height:260px;display:block}
     </div>
     <hr class="sep">
     <div class="ctl">
-      <label for="kp">Kp</label><input id="kp" type="range" min="0.1" max="10" step="0.1" value="2"><output id="kpO">2,0</output>
-      <label for="ti">Ti (s)</label><input id="ti" type="range" min="0" max="120" step="1" value="20"><output id="tiO">20</output>
-      <label for="td">Td (s)</label><input id="td" type="range" min="0" max="20" step="0.5" value="0"><output id="tdO">0,0</output>
+      <label for="kp">Kp</label><input id="kp" type="range" min="0.1" max="20" step="0.1" value="2"><output id="kpO">2,0</output>
+      <label for="ti">Ti (s)</label><input id="ti" type="range" min="0" max="120" step="0.5" value="20"><output id="tiO">20,0</output>
+      <label for="td">Td (s)</label><input id="td" type="range" min="0" max="20" step="0.1" value="0"><output id="tdO">0,0</output>
     </div>
     <p class="note">Ti = 0 slår av I-leddet (ren P-regulator). Utgangen er begrenset til 0–100 % med anti-windup.</p>
+    <div class="tagrow">
+      <span class="tag" style="font-size:1.05rem">Autotuning<small id="atState">Klar</small></span>
+      <div class="simctl"><button id="atUndo" type="button" disabled>Angre</button><button id="atBtn" type="button">Start autotuning</button></div>
+    </div>
+    <div class="ctl">
+      <label for="atD">Reléutslag</label><input id="atD" type="range" min="5" max="40" step="1" value="20"><output id="atDO">20 %</output>
+    </div>
+    <div class="chain" aria-label="Resultat fra autotuning">
+      <div><b>Ku</b><span id="rKu">–</span></div>
+      <div><b>Pu</b><span id="rPu">–</span></div>
+      <div><b>Amplitude a</b><span id="rA">–</span></div>
+      <div><b>Kp / Ti</b><span id="rSet">–</span></div>
+    </div>
+    <p class="note">Relémetoden: regulatoren slår utgangen opp og ned rundt arbeidspunktet til nivået svinger jevnt. Fra svingetiden Pu og amplituden a beregnes Ku = 4d / (πa), og regulatoren regner ut og legger inn nye verdier for Kp og Ti. Krever AUTO, P 1 i drift og V 1 åpen minst 10 %.</p>
     <hr class="sep">
     <div class="ctl">
       <label for="hvs">V 1 forbruk</label><input id="hvs" type="range" min="0" max="100" step="1" value="0"><output id="hvO">0 %</output>
@@ -312,6 +326,7 @@ canvas{width:100%;height:260px;display:block}
     <li><b>Ren P-regulator</b><p>Sett Ti til 0 og endre forbruket. Nivået får et varig avvik fra settpunktet. Hvor stort er det med Kp = 1 og Kp = 5?</p></li>
     <li><b>Ustabil sløyfe</b><p>Sett Kp til 10 og Ti til 3 s. Hva skjer med nivået og pumpa?</p></li>
     <li><b>Uten marginer</b><p>Sett LZ 2 til 100 % og settpunktet til 95 %. Hvor nær overløp kommer nivået ved et oversving? Hvorfor velger man en margin i praksis?</p></li>
+    <li><b>Autotuning</b><p>Start P 1, åpne V 1 til 50 % og la nivået roe seg. Kjør autotuning og se svingningene i trenden. Test settpunkt fra 50 til 70 % med gamle og nye parametre. Hva ble bedre?</p></li>
     <li><b>Feil på LT 1</b><p>Kryss av for feil på LT 1, og senk forbruket. Hvem stopper pumpa, og hvorfor må vernet ha egen giver?</p></li>
     <li><b>Manuell drift</b><p>Sett LIC 1 i MAN og finn pumpeutgangen som holder nivået stabilt. Bytt tilbake til AUTO. Merker du rykk i utgangen?</p></li>
   </ul>
@@ -329,11 +344,12 @@ const V2MAX=150;                 // Tank 2 rommer 150 L
 const TY=v=>308-236*v/CAP1;      // nivå i % → y i tegningen av Tank 1
 const QMAX=2.0;                  // L/s ved 50 Hz
 const KV=2.0;                    // L/s ved 100 % åpen og full tank
+const THETA=3, TAU_LT=1;         // s: dødtid i returrøret P 1 → Tank 1, dempning i LT 1
 const RAMP=10;                   // Hz/s rampe i frekvensomformer
 let LZ_TRIP=100;
 let S;
 function init(){
-  S={power:true,locked:false,pumpRun:false,t:0,V1:50,V2:90,hz:0,I:35,pvPrev:50,dF:0,auto:true,man:35,u:35,trip:false,ack:false,frozen:null,hist:[],acc:0};
+  S={lt:50,pipe:[],at:null,atMsg:'',atRes:null,prev:null,power:true,locked:false,pumpRun:false,t:0,V1:50,V2:90,hz:0,I:35,pvPrev:50,dF:0,auto:true,man:35,u:35,trip:false,ack:false,frozen:null,hist:[],acc:0};
 }
 init();
 const P={sp:50,kp:2,ti:20,td:0,hv:0,fault:false,bypass:false};
@@ -341,14 +357,17 @@ let running=true, speed=5;
 
 function step(dt){
   const lvl=S.V1/V1MAX*100;
-  // LT 1
-  if(P.fault){ if(S.frozen===null) S.frozen=lvl; } else S.frozen=null;
-  const pv=Math.min(100,P.fault?S.frozen:lvl); // LT 1 går ikke over 20 mA
+  // LT 1 med dempning
+  S.lt+=(lvl-S.lt)*Math.min(1,dt/TAU_LT);
+  if(P.fault){ if(S.frozen===null) S.frozen=S.lt; } else S.frozen=null;
+  const pv=Math.min(100,P.fault?S.frozen:S.lt); // LT 1 går ikke over 20 mA
   // LIC 1 – PID
   const e=P.sp-pv;
   const dPV=(pv-S.pvPrev)/dt; S.pvPrev=pv;
   S.dF+= (dPV-S.dF)*Math.min(1,dt/1.0);
-  if(S.auto){
+  if(S.at&&S.auto){
+    atStep(e,pv);
+  } else if(S.auto){
     const D=-P.kp*P.td*S.dF;
     let Inew=S.I;
     if(P.ti>0) Inew+=P.kp*dt/P.ti*e; else Inew=0;
@@ -372,7 +391,9 @@ function step(dt){
   let qp=QMAX*S.hz/50; if(S.V2<=0.01) qp=0;
   let qv=KV*(P.hv/100)*Math.sqrt(Math.max(0,S.V1)/V1MAX);
   qp=Math.min(qp,S.V2/dt); qv=Math.min(qv,S.V1/dt);
-  S.V1+= (qp-qv)*dt; S.V2+=(qv-qp)*dt;
+  // transport gjennom returrøret: vannet når Tank 1 THETA sekunder etter at P 1 har pumpet det
+  S.pipe.push([S.t+THETA,qp*dt]); let qin=0; while(S.pipe.length&&S.pipe[0][0]<=S.t) qin+=S.pipe.shift()[1];
+  S.V1+= qin-qv*dt; S.V2+=(qv-qp)*dt;
   let over=0; if(S.V1>CAP1){over=S.V1-CAP1;S.V1=CAP1;S.V2+=over;} // overløp renner til tank 2
   S.V2=Math.max(0,Math.min(V2MAX,S.V2)); S.V1=Math.max(0,S.V1);
   S.qp=qp;S.qv=qv;S.pv=pv;S.mA=mA;S.ltmA=4+16*pv/100;S.overflow=S.V1>=CAP1-0.05;S.dry=S.V2<=0.5&&hzTarget>0;
@@ -380,15 +401,49 @@ function step(dt){
   if(S.acc>=0.5){S.acc=0;S.hist.push([S.t,lvl,P.sp,S.u]); while(S.hist.length&&S.hist[0][0]<S.t-180)S.hist.shift();}
 }
 
+// Autotuning med relémetoden (Åström–Hägglund)
+function atStart(){
+  const why=!S.auto?'LIC 1 må stå i AUTO':!(S.pumpRun&&S.power)?'P 1 må gå (trykk Drift)':(S.trip&&!P.bypass)?'LZ 2 er utløst':P.fault?'LT 1 har målefeil':P.hv<10?'Åpne V 1 minst 10 %':Math.abs(P.sp-S.pv)>10?'Nivået må være innenfor 10 % av settpunktet':null;
+  if(why){S.atMsg='Kan ikke starte: '+why;return;}
+  S.prev={kp:P.kp,ti:P.ti,td:P.td};
+  S.at={u0:S.u,d:+$('atD').value,eps:0.5,st:(P.sp-S.pv)>=0?1:-1,sw:[],his:[],los:[],hi:-1e9,lo:1e9,t0:S.t};
+}
+function atStop(msg){S.at=null;S.atMsg=msg;}
+function setSl(id,v){const el=$(id);el.value=v;el.dispatchEvent(new Event('input'));}
+function atStep(e,pv){
+  const A=S.at;
+  if(!(S.pumpRun&&S.power)||(S.trip&&!P.bypass)){atStop('Avbrutt: P 1 stoppet');return;}
+  A.hi=Math.max(A.hi,pv);A.lo=Math.min(A.lo,pv);
+  if(A.st===1&&e<-A.eps){A.st=-1;A.sw.push(S.t);A.his.push(A.hi);A.hi=-1e9;}
+  else if(A.st===-1&&e>A.eps){A.st=1;A.sw.push(S.t);A.los.push(A.lo);A.lo=1e9;}
+  S.u=Math.max(0,Math.min(100,A.u0+A.st*A.d));
+  S.I=S.u-P.kp*e;
+  if(S.t-A.t0>400){atStop('Avbrutt: fant ingen jevn svingning innen 400 s');return;}
+  if(A.sw.length>=9){
+    const n=A.sw.length, Pu=(A.sw[n-1]-A.sw[n-5])/2;
+    const a=(A.his[A.his.length-1]-A.los[A.los.length-1])/2;
+    const Ku=4*A.d/(Math.PI*Math.sqrt(Math.max(1e-4,a*a-A.eps*A.eps)));
+    // Ziegler–Nichols PI
+    setSl('kp',0.45*Ku);setSl('ti',Pu/1.2);setSl('td',0);
+    const name=fmt(P.kp,1)+' / '+fmt(P.ti,1)+' s';
+    S.I=S.u-P.kp*e;
+    S.atRes={Ku,Pu,a,name};
+    atStop('Ferdig: Kp '+fmt(P.kp,1)+', Ti '+fmt(P.ti,1)+' s, Td '+fmt(P.td,1)+' s');
+  }
+}
+$('atBtn').onclick=()=>{if(S.at)atStop('Avbrutt av operatør');else atStart();};
+$('atUndo').onclick=()=>{if(!S.prev||S.at)return;setSl('kp',S.prev.kp);setSl('ti',S.prev.ti);setSl('td',S.prev.td);S.prev=null;S.atMsg='Forrige parametre er lagt tilbake';};
+$('atD').addEventListener('input',e=>{$('atDO').textContent=e.target.value+' %';});
+
 // UI-binding
 function bind(id,key,out,dec,unit){
   const el=$(id),o=$(out);
   const f=()=>{P[key]=parseFloat(el.value);o.textContent=fmt(P[key],dec)+(unit||'');};
   el.addEventListener('input',f);f();
 }
-bind('sp','sp','spO',0,' %');bind('kp','kp','kpO',1);bind('ti','ti','tiO',0);bind('td','td','tdO',1);bind('hvs','hv','hvO',0,' %');
+bind('sp','sp','spO',0,' %');bind('kp','kp','kpO',1);bind('ti','ti','tiO',1);bind('td','td','tdO',1);bind('hvs','hv','hvO',0,' %');
 $('man').addEventListener('input',e=>{S.man=+e.target.value;$('manO').textContent=S.man+' %';});
-function setMode(a){S.auto=a;$('mAuto').classList.toggle('on',a);$('mMan').classList.toggle('on',!a);$('man').disabled=a;$('sp').disabled=!a;
+function setMode(a){if(!a&&S.at)atStop('Avbrutt: LIC 1 ble satt i MAN');S.auto=a;$('mAuto').classList.toggle('on',a);$('mMan').classList.toggle('on',!a);$('man').disabled=a;$('sp').disabled=!a;
   if(!a){S.man=Math.round(S.u);$('man').value=S.man;$('manO').textContent=S.man+' %';}}
 $('mAuto').onclick=()=>setMode(true);$('mMan').onclick=()=>setMode(false);
 $('lzs').addEventListener('input',e=>{LZ_TRIP=+e.target.value;$('lzO').textContent=LZ_TRIP+' %';$('lzSmall').textContent='Overfyllingsvern, trip ved '+LZ_TRIP+' %';});
@@ -458,6 +513,15 @@ function render(){
   if(P.fault)a.push(['LT 1 målefeil (frosset verdi)','warn']);
   if(P.bypass)a.push(['LZ 2 forbikoblet','warn']);
   if(!S.auto)a.push(['LIC 1 i manuell','warn']);
+  if(S.at)a.push(['LIC 1 autotuning pågår','warn']);
+  { const at=S.at;
+    $('atBtn').textContent=at?'Avbryt':'Start autotuning';
+    $('atState').textContent=at?('Pågår: svingning '+Math.min(4,Math.floor(at.sw.length/2)+1)+' av 4'):(S.atMsg||'Klar');
+    $('atUndo').disabled=!S.prev||!!at;
+    ['atD','kp','ti','td'].forEach(id=>$(id).disabled=!!at);
+    const R=S.atRes;
+    $('rKu').textContent=R?fmt(R.Ku,1):'–';$('rPu').textContent=R?fmt(R.Pu,1)+' s':'–';
+    $('rA').textContent=R?fmt(R.a,2)+' %':'–';$('rSet').textContent=R?R.name:'–'; }
   if(!S.pumpRun)a.push(['P 1 stoppet av operatør','warn']);
   if(!S.power)a.push(['Sikkerhetsbryter i 0'+(S.locked?' (låst)':'')+' – P 1 uten spenning','warn']);
   $('dPV').textContent=fmt(S.pv);$('dSP').textContent=fmt(P.sp);

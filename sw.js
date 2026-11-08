@@ -1,6 +1,6 @@
 // Service worker: lagrer appen lokalt slik at den virker uten nett.
 // Øk VERSION når filene endres, så henter elevene den nye versjonen.
-const VERSION = 'nivaregulering-v1';
+const VERSION = 'nivaregulering-v3';
 const FILES = [
   './', './index.html', './manifest.webmanifest', './fonts.css',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',
